@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Controls - Custom Reset Control</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+    <style>
+        .maplibregl-ctrl.reset-ctrl button {
+            width: 30px;
+            height: 30px;
+            border: 0;
+            margin: 0;
+            background: #fff;
+            cursor: pointer;
+            font-size: 18px;
+            line-height: 30px;
+        }
+    </style>
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to controls</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Custom reset control</h2>
+    <p>Implements a custom control that resets map center and zoom.</p>
+    <p class="small">Drag map away, then click the target icon in top-right controls.</p>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    const HOME_VIEW = {
+        center: [2.3522, 48.8566],
+        zoom: 10,
+        bearing: 0,
+        pitch: 45
+    };
+
+    class ResetViewControl {
+        onAdd(map) {
+            this._map = map;
+            this._container = document.createElement("div");
+            this._container.className = "maplibregl-ctrl maplibregl-ctrl-group reset-ctrl";
+
+            const button = document.createElement("button");
+            button.type = "button";
+            button.title = "Reset view";
+            button.textContent = "◎";
+            button.addEventListener("click", () => {
+                this._map.easeTo({
+                    center: HOME_VIEW.center,
+                    zoom: HOME_VIEW.zoom,
+                    bearing: HOME_VIEW.bearing,
+                    pitch: HOME_VIEW.pitch,
+                    duration: 700
+                });
+            });
+
+            this._container.appendChild(button);
+            return this._container;
+        }
+
+        onRemove() {
+            this._container.parentNode.removeChild(this._container);
+            this._map = undefined;
+        }
+    }
+
+    const map = demoUtils.createMap(Object.assign({container: "map"}, HOME_VIEW));
+    map.addControl(new maplibregl.NavigationControl(), "top-right");
+    map.addControl(new ResetViewControl(), "top-right");
+</script>
+</body>
+</html>

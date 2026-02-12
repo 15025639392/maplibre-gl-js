@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Layers - GeoJSON Points</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to layers</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>GeoJSON points layer</h2>
+    <p>Adds runtime point data and styles it with a circle layer.</p>
+    <p class="small">Use this page as a template for source/layer debugging.</p>
+    <div class="controls">
+        <button id="btn-randomize">Randomize points</button>
+    </div>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    function buildFeatureCollection(count) {
+        const features = [];
+        for (let i = 0; i < count; i++) {
+            const lng = 115.8 + Math.random() * 1.5;
+            const lat = 39.4 + Math.random() * 1.1;
+            features.push({
+                type: "Feature",
+                geometry: {type: "Point", coordinates: [lng, lat]},
+                properties: {
+                    value: Math.round(Math.random() * 100)
+                }
+            });
+        }
+
+        return {
+            type: "FeatureCollection",
+            features: features
+        };
+    }
+
+    const map = demoUtils.createMap({
+        container: "map",
+        center: [116.391, 39.907],
+        zoom: 8.5
+    });
+
+    demoUtils.addDefaultControls(map);
+
+    map.on("load", () => {
+        map.addSource("demo-points", {
+            type: "geojson",
+            data: buildFeatureCollection(250)
+        });
+
+        map.addLayer({
+            id: "demo-points-circle",
+            type: "circle",
+            source: "demo-points",
+            paint: {
+                "circle-radius": ["interpolate", ["linear"], ["zoom"], 5, 3, 10, 9],
+                "circle-color": [
+                    "interpolate",
+                    ["linear"],
+                    ["get", "value"],
+                    0, "#2563eb",
+                    50, "#22c55e",
+                    100, "#ef4444"
+                ],
+                "circle-opacity": 0.8,
+                "circle-stroke-width": 1,
+                "circle-stroke-color": "#ffffff"
+            }
+        });
+    });
+
+    document.getElementById("btn-randomize").addEventListener("click", () => {
+        const source = map.getSource("demo-points");
+        if (source) {
+            source.setData(buildFeatureCollection(250));
+        }
+    });
+</script>
+</body>
+</html>

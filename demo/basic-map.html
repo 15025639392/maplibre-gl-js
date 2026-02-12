@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Demo - Basic Map</title>
+    <link href="../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="./assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to demo hub</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Basic map</h2>
+    <p>Minimal setup for smoke testing local builds.</p>
+    <p class="small">Bundle: <code>dist/maplibre-gl-dev.js</code></p>
+</div>
+
+<script src="../dist/maplibre-gl-dev.js"></script>
+<script src="./assets/map-utils.js"></script>
+<script>
+    const map = demoUtils.createMap({
+        container: "map",
+        center: [116.391, 39.907],
+        zoom: 9
+    });
+
+    demoUtils.addDefaultControls(map);
+</script>
+</body>
+</html>

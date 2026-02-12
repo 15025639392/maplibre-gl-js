@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Performance - Many Points</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to performance</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Many points stress test</h2>
+    <p>Generate many GeoJSON points to test render and interaction performance.</p>
+    <div class="controls">
+        <button data-count="5000">Load 5k points</button>
+        <button data-count="20000">Load 20k points</button>
+    </div>
+    <p id="status" class="small"></p>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    const map = demoUtils.createMap({
+        container: "map",
+        center: [116.391, 39.907],
+        zoom: 7
+    });
+
+    demoUtils.addDefaultControls(map);
+
+    const statusEl = document.getElementById("status");
+
+    function buildPoints(count) {
+        const features = [];
+        for (let i = 0; i < count; i++) {
+            const lng = 113 + Math.random() * 8;
+            const lat = 36 + Math.random() * 7;
+            features.push({
+                type: "Feature",
+                geometry: {type: "Point", coordinates: [lng, lat]},
+                properties: {id: i}
+            });
+        }
+        return {
+            type: "FeatureCollection",
+            features: features
+        };
+    }
+
+    function setPoints(count) {
+        const startedAt = performance.now();
+        const data = buildPoints(count);
+
+        const source = map.getSource("many-points");
+        if (source) {
+            source.setData(data);
+        } else {
+            map.addSource("many-points", {
+                type: "geojson",
+                data: data
+            });
+
+            map.addLayer({
+                id: "many-points-layer",
+                type: "circle",
+                source: "many-points",
+                paint: {
+                    "circle-radius": 2.2,
+                    "circle-color": "#0ea5e9",
+                    "circle-opacity": 0.45
+                }
+            });
+        }
+
+        const elapsed = (performance.now() - startedAt).toFixed(1);
+        demoUtils.addStatusLabel(statusEl, "Loaded " + count + " points, generation time: " + elapsed + " ms");
+    }
+
+    document.querySelectorAll("button[data-count]").forEach((button) => {
+        button.addEventListener("click", () => {
+            setPoints(Number(button.dataset.count));
+        });
+    });
+
+    map.on("load", () => {
+        setPoints(5000);
+    });
+</script>
+</body>
+</html>

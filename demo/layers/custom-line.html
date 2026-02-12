@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Layers - Custom Line</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to layers</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Custom line layer</h2>
+    <p>Renders a route line using a runtime GeoJSON source with line metrics.</p>
+    <div class="controls">
+        <button id="btn-fit">Fit route</button>
+        <button id="btn-beijing">Center Beijing</button>
+    </div>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    const routeCoordinates = [
+        [116.282, 39.899],
+        [116.33, 39.91],
+        [116.37, 39.93],
+        [116.42, 39.915],
+        [116.48, 39.885],
+        [116.53, 39.865]
+    ];
+
+    const map = demoUtils.createMap({
+        container: "map",
+        center: [116.41, 39.9],
+        zoom: 10
+    });
+
+    demoUtils.addDefaultControls(map);
+
+    map.on("load", () => {
+        map.addSource("demo-route", {
+            type: "geojson",
+            lineMetrics: true,
+            data: {
+                type: "Feature",
+                geometry: {
+                    type: "LineString",
+                    coordinates: routeCoordinates
+                },
+                properties: {}
+            }
+        });
+
+        map.addLayer({
+            id: "demo-route-layer",
+            type: "line",
+            source: "demo-route",
+            paint: {
+                "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4, 13, 10],
+                "line-color": "#7c3aed",
+                "line-opacity": 0.88
+            }
+        });
+
+        map.addLayer({
+            id: "demo-route-casing",
+            type: "line",
+            source: "demo-route",
+            paint: {
+                "line-width": ["interpolate", ["linear"], ["zoom"], 8, 7, 13, 14],
+                "line-color": "#111827",
+                "line-opacity": 0.2
+            }
+        }, "demo-route-layer");
+    });
+
+    document.getElementById("btn-fit").addEventListener("click", () => {
+        const bounds = routeCoordinates.reduce((b, coord) => b.extend(coord), new maplibregl.LngLatBounds(routeCoordinates[0], routeCoordinates[0]));
+        map.fitBounds(bounds, {padding: 80, duration: 800});
+    });
+
+    document.getElementById("btn-beijing").addEventListener("click", () => {
+        map.easeTo({center: [116.391, 39.907], zoom: 10, duration: 800});
+    });
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Performance - Stable Tiles</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to performance</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Stable tiles profile</h2>
+    <p>Configuration optimized for always showing fallback tiles during fast zoom/pan.</p>
+    <p class="small">
+        <code>cancelPendingTileRequestsWhileZooming=false</code>,
+        <code>maxTileCacheZoomLevels=10</code>
+    </p>
+    <div class="controls">
+        <button data-city="beijing">Beijing</button>
+        <button data-city="london">London</button>
+        <button data-city="newyork">New York</button>
+        <button id="btn-zoom-pulse">Zoom pulse</button>
+    </div>
+    <p id="status" class="small"></p>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    const cities = {
+        beijing: [116.391, 39.907],
+        london: [-0.1276, 51.5072],
+        newyork: [-74.006, 40.7128]
+    };
+
+    const map = demoUtils.createMap({
+        container: "map",
+        center: cities.beijing,
+        zoom: 9,
+        cancelPendingTileRequestsWhileZooming: false,
+        maxTileCacheZoomLevels: 10,
+        renderWorldCopies: true
+    });
+
+    demoUtils.addDefaultControls(map);
+
+    const statusEl = document.getElementById("status");
+
+    function refreshStatus() {
+        const tilesLoaded = map.areTilesLoaded() ? "yes" : "no";
+        demoUtils.addStatusLabel(statusEl, "tilesLoaded=" + tilesLoaded + ", zoom=" + map.getZoom().toFixed(2));
+    }
+
+    map.on("sourcedata", refreshStatus);
+    map.on("moveend", refreshStatus);
+
+    document.querySelectorAll("button[data-city]").forEach((button) => {
+        button.addEventListener("click", () => {
+            const target = cities[button.dataset.city];
+            map.easeTo({center: target, zoom: 9.5, duration: 900});
+        });
+    });
+
+    document.getElementById("btn-zoom-pulse").addEventListener("click", async () => {
+        map.easeTo({zoom: 12, duration: 600});
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        map.easeTo({zoom: 8, duration: 700});
+    });
+
+    map.on("load", refreshStatus);
+</script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html class="map-page" lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Controls - Navigation and Scale</title>
+    <link href="../../dist/maplibre-gl.css" rel="stylesheet">
+    <link href="../assets/demo.css" rel="stylesheet">
+</head>
+<body class="map-page">
+<a class="back-link" href="./index.html">Back to controls</a>
+<div id="map"></div>
+<div class="toolbar">
+    <h2>Navigation + Scale controls</h2>
+    <p>Test built-in controls and interaction handlers quickly.</p>
+    <div class="controls">
+        <button id="btn-toggle-scroll">Toggle scroll zoom</button>
+        <button id="btn-toggle-drag">Toggle drag pan</button>
+    </div>
+    <p id="status" class="small"></p>
+</div>
+
+<script src="../../dist/maplibre-gl-dev.js"></script>
+<script src="../assets/map-utils.js"></script>
+<script>
+    const map = demoUtils.createMap({
+        container: "map",
+        center: [-74.5, 40],
+        zoom: 9
+    });
+
+    map.addControl(new maplibregl.NavigationControl({visualizePitch: true}), "top-right");
+    map.addControl(new maplibregl.ScaleControl({unit: "metric"}), "bottom-left");
+    map.addControl(new maplibregl.FullscreenControl(), "top-right");
+
+    const statusEl = document.getElementById("status");
+
+    function refreshStatus() {
+        const scroll = map.scrollZoom.isEnabled() ? "on" : "off";
+        const drag = map.dragPan.isEnabled() ? "on" : "off";
+        demoUtils.addStatusLabel(statusEl, "scrollZoom=" + scroll + ", dragPan=" + drag);
+    }
+
+    document.getElementById("btn-toggle-scroll").addEventListener("click", () => {
+        if (map.scrollZoom.isEnabled()) {
+            map.scrollZoom.disable();
+        } else {
+            map.scrollZoom.enable();
+        }
+        refreshStatus();
+    });
+
+    document.getElementById("btn-toggle-drag").addEventListener("click", () => {
+        if (map.dragPan.isEnabled()) {
+            map.dragPan.disable();
+        } else {
+            map.dragPan.enable();
+        }
+        refreshStatus();
+    });
+
+    map.on("load", refreshStatus);
+</script>
+</body>
+</html>
