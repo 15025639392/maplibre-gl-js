@@ -1,5 +1,6 @@
 import {MercatorCameraHelper} from './mercator_camera_helper';
 import {VerticalPerspectiveCameraHelper} from './vertical_perspective_camera_helper';
+import {getProjectionSegregationMode} from './projection_config';
 
 import type Point from '@mapbox/point-geometry';
 import type {CameraForBoxAndBearingHandlerResult, EaseToHandlerResult, EaseToHandlerOptions, FlyToHandlerResult, FlyToHandlerOptions, ICameraHelper, MapControlsDeltas} from './camera_helper';
@@ -24,7 +25,13 @@ export class GlobeCameraHelper implements ICameraHelper {
         this._verticalPerspectiveCameraHelper = new VerticalPerspectiveCameraHelper();
     }
 
-    get useGlobeControls(): boolean { return this._globe.useGlobeRendering; }
+    get useGlobeControls(): boolean {
+        // In strict mode, globe controls are always active — no fallback to Mercator controls.
+        if (getProjectionSegregationMode() === 'strict') {
+            return true;
+        }
+        return this._globe.useGlobeRendering;
+    }
 
     get currentHelper(): ICameraHelper {
         return this.useGlobeControls ? this._verticalPerspectiveCameraHelper : this._mercatorCameraHelper;

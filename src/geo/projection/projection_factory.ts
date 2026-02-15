@@ -8,6 +8,7 @@ import {GlobeCameraHelper} from './globe_camera_helper';
 import {VerticalPerspectiveCameraHelper} from './vertical_perspective_camera_helper';
 import {VerticalPerspectiveTransform} from './vertical_perspective_transform';
 import {VerticalPerspectiveProjection} from './vertical_perspective_projection';
+import {getProjectionSegregationMode} from './projection_config';
 
 import type {ProjectionSpecification} from '@maplibre/maplibre-gl-style-spec';
 import type {Projection} from './projection';
@@ -20,7 +21,12 @@ export function createProjectionFromName(name: ProjectionSpecification['type'], 
     cameraHelper: ICameraHelper;
 } {
     const transformOptions = {constrainOverride: transformConstrain};
+    const mode = getProjectionSegregationMode();
+
     if (Array.isArray(name)) {
+        // Array-based projection definition (interpolate expression)
+        // In strict mode, array-based definitions are not supported for globe;
+        // fall through to legacy-hybrid behavior.
         const globeProjection = new GlobeProjection({type: name});
         return {
             projection: globeProjection,
@@ -39,6 +45,24 @@ export function createProjectionFromName(name: ProjectionSpecification['type'], 
         }
         case 'globe':
         {
+            if (mode === 'strict') {
+                // Strict mode: 'globe' uses Globe* wrappers but configured with
+                // fixed 'vertical-perspective' (no zoom-based transition).
+                // Combined with strict guards in GlobeProjection/GlobeTransform/
+                // GlobeCameraHelper, this ensures:
+                //  - transitionState is always 1
+                //  - _globeness is always 1
+                //  - useGlobeControls is always true
+                //  - projection.name remains 'globe' (API compatible)
+                const globeProjection = new GlobeProjection({type: 'vertical-perspective'});
+                return {
+                    projection: globeProjection,
+                    transform: new GlobeTransform(transformOptions),
+                    cameraHelper: new GlobeCameraHelper(globeProjection),
+                };
+            }
+            // Legacy-hybrid mode: 'globe' creates a hybrid pipeline that transitions
+            // between VerticalPerspective and Mercator based on zoom level.
             const globeProjection = new GlobeProjection({type: [
                 'interpolate',
                 ['linear'],

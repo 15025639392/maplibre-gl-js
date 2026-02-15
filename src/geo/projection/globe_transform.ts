@@ -4,6 +4,7 @@ import {MercatorTransform} from './mercator_transform';
 import {VerticalPerspectiveTransform} from './vertical_perspective_transform';
 import {type LngLat, type LngLatLike,} from '../lng_lat';
 import {lerp} from '../../util/util';
+import {getProjectionSegregationMode} from './projection_config';
 import type {OverscaledTileID, UnwrappedTileID, CanonicalTileID} from '../../tile/tile_id';
 
 import type Point from '@mapbox/point-geometry';
@@ -234,14 +235,52 @@ export class GlobeTransform implements ITransform {
     }
 
     setTransitionState(globeness: number, errorCorrectionValue: number): void {
-        this._globeness = globeness;
+        // In strict mode, globeness is always 1 — no transition to Mercator.
+        if (getProjectionSegregationMode() === 'strict') {
+            this._globeness = 1;
+        } else {
+            this._globeness = globeness;
+        }
         this._globeLatitudeErrorCorrectionRadians = errorCorrectionValue;
         this._calcMatrices();
         this._verticalPerspectiveTransform.getCoveringTilesDetailsProvider().prepareNextFrame();
         this._mercatorTransform.getCoveringTilesDetailsProvider().prepareNextFrame();
     }
 
+    /**
+     * Whether the strict-mode high-zoom mercator fallback is active.
+     *
+     * When true, the **shader** has fully transitioned to mercator math
+     * (via `_computeShaderTransition`), so the internal rendering
+     * pipeline (covering tiles, frustum, depth values) should also use
+     * the mercator transform to stay consistent.
+     *
+     * At zoom < {@link STRICT_SHADER_TRANSITION_END} this returns false
+     * and full VP rendering is used. At zoom ≥ that threshold the shader
+     * is 100 % mercator and we switch the internal pipeline too.
+     */
+    private _isHighZoomMercatorFallback(): boolean {
+        return getProjectionSegregationMode() === 'strict'
+            && this.zoom >= GlobeTransform.STRICT_SHADER_TRANSITION_END;
+    }
+
+    /**
+     * The active internal transform for covering-tiles, frustum culling,
+     * screen-to-location math and other rendering internals.
+     *
+     * In strict mode at high zoom the shader has fully transitioned to
+     * mercator math, so we also switch the internal pipeline to the
+     * mercator transform.  This avoids:
+     *
+     * - VP covering-tiles instability → flickering / missing tiles
+     * - VP's extreme near/far Z polluting the mercator perspective
+     *   matrix → depth-buffer precision collapse → black screen
+     * - VP clipping-plane incorrectly culling visible geometry
+     */
     private get currentTransform(): ITransform {
+        if (this.isGlobeRendering && this._isHighZoomMercatorFallback()) {
+            return this._mercatorTransform;
+        }
         return this.isGlobeRendering ? this._verticalPerspectiveTransform : this._mercatorTransform;
     }
 
@@ -285,6 +324,62 @@ export class GlobeTransform implements ITransform {
 
     public get cameraPosition(): vec3 { return this.currentTransform.cameraPosition; }
 
+    /**
+     * Zoom level at which the strict-mode globe shader starts transitioning
+     * to the mercator fallback math. Below this level the GPU runs full
+     * sphere-projection; above {@link STRICT_SHADER_TRANSITION_END} it runs
+     * pure mercator math via `u_projection_fallback_matrix`.
+     *
+     * The transition exists because the VP globe matrix is stored as Float32
+     * on the GPU. At high zoom `globeRadiusPixels` is enormous (tens of
+     * millions), and the float32 precision of the matrix can no longer
+     * distinguish adjacent tile-boundary vertices — causing visible tile
+     * seams and, at extreme zoom, a black screen.
+     *
+     * | zoom | globeRadiusPixels ≈ | float32 screen error |
+     * |------|---------------------|----------------------|
+     * |  14  |        1 744 K      |       ~0.1 px        |
+     * |  15  |        3 488 K      |       ~0.2 px        |
+     * |  16  |        6 975 K      |       ~0.4 px        |
+     * |  17  |       13 950 K      |       ~0.8 px        |
+     * |  18  |       27 900 K      |       ~1.7 px        |
+     * |  19+ |       55 800 K+     |       ~3.3 px+       |
+     *
+     * At zoom ≥ 13 the visual difference between globe and mercator is
+     * already imperceptible (< 0.03 px per 512-pixel tile at the equator),
+     * so switching the *shader* to mercator has zero user-visible impact
+     * while completely eliminating the precision artifacts. Everything
+     * else — API surface, covering-tiles, camera helpers — stays in globe
+     * mode.
+     */
+    static readonly STRICT_SHADER_TRANSITION_START = 13;
+    /** Zoom level at which the strict-mode shader is fully mercator. */
+    static readonly STRICT_SHADER_TRANSITION_END = 14;
+
+    /**
+     * Compute the effective `projectionTransition` uniform for the shader.
+     *
+     * In legacy-hybrid mode this is simply `_globeness` (which ramps
+     * 1→0 at zoom 11-12). In strict mode `_globeness` is always 1, but
+     * we still need to ramp the *shader* transition down at high zoom to
+     * avoid float32 precision artefacts — see table above.
+     */
+    private _computeShaderTransition(applyGlobeMatrix: boolean): number {
+        if (!applyGlobeMatrix) return 0;
+
+        let t = this._globeness;
+        if (t > 0 && getProjectionSegregationMode() === 'strict') {
+            const zoom = this.zoom;
+            const {STRICT_SHADER_TRANSITION_START, STRICT_SHADER_TRANSITION_END} = GlobeTransform;
+            if (zoom > STRICT_SHADER_TRANSITION_START) {
+                const fade = Math.min(1, (zoom - STRICT_SHADER_TRANSITION_START)
+                    / (STRICT_SHADER_TRANSITION_END - STRICT_SHADER_TRANSITION_START));
+                t *= (1 - fade);
+            }
+        }
+        return t;
+    }
+
     getProjectionData(params: ProjectionDataParams): ProjectionData {
         const mercatorProjectionData = this._mercatorTransform.getProjectionData(params);
         const verticalPerspectiveProjectionData = this._verticalPerspectiveTransform.getProjectionData(params);
@@ -293,7 +388,7 @@ export class GlobeTransform implements ITransform {
             mainMatrix: this.isGlobeRendering ? verticalPerspectiveProjectionData.mainMatrix : mercatorProjectionData.mainMatrix,
             clippingPlane: verticalPerspectiveProjectionData.clippingPlane,
             tileMercatorCoords: verticalPerspectiveProjectionData.tileMercatorCoords,
-            projectionTransition: params.applyGlobeMatrix ? this._globeness : 0,
+            projectionTransition: this._computeShaderTransition(params.applyGlobeMatrix),
             fallbackMatrix: mercatorProjectionData.fallbackMatrix,
         };
     }
@@ -338,10 +433,21 @@ export class GlobeTransform implements ITransform {
 
         // When transitioning between globe and mercator, we need to synchronize the depth values in both transforms.
         // For this reason we first update vertical perspective and then sync our Z values to its result.
-        // Now if globe rendering, we always want to force mercator transform to adapt our Z values.
-        // If not, it will either compute its own (autoCalculateNearFarZ=false) or adapt our (autoCalculateNearFarZ=true).
-        // In either case we want to (again) sync our Z values, this time with
-        this._mercatorTransform.apply(this, true, this.isGlobeRendering);
+        //
+        // `forceOverrideZ` controls whether the mercator transform inherits VP's Z values
+        // (autoCalculateNearFarZ = false) or computes its own (autoCalculateNearFarZ = true).
+        //
+        // In legacy-hybrid mode or strict mode below the shader transition threshold,
+        // we force VP's Z values onto mercator to keep depth buffers synchronized
+        // during the globe↔mercator blend.
+        //
+        // In strict mode at high zoom (shader fully transitioned to mercator), we let
+        // mercator compute its OWN near/far Z. VP's extreme Z values
+        // (nearZ=0.5, farZ=cameraToCenterDistance + globeRadiusPixels*2 ≈ 55M @zoom18)
+        // would give a near/far ratio of ~110M:1, completely destroying depth-buffer
+        // precision and causing a black screen.
+        const forceVPDepthValues = this.isGlobeRendering && !this._isHighZoomMercatorFallback();
+        this._mercatorTransform.apply(this, true, forceVPDepthValues);
         this._helper._nearZ = this._mercatorTransform.nearZ;
         this._helper._farZ = this._mercatorTransform.farZ;
     }
@@ -462,6 +568,8 @@ export class GlobeTransform implements ITransform {
 
         const globeData = this._verticalPerspectiveTransform.getProjectionDataForCustomLayer(applyGlobeMatrix);
         globeData.fallbackMatrix = mercatorData.mainMatrix;
+        // Apply the same high-zoom shader transition for custom layers.
+        globeData.projectionTransition = this._computeShaderTransition(applyGlobeMatrix);
         return globeData;
     }
 

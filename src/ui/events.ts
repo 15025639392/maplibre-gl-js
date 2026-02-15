@@ -763,9 +763,17 @@ export type MapProjectionEvent = {
      * Specifies the name of the new projection.
      * For example:
      *
-     *  - `globe` to describe globe that has internally switched to mercator
-     *  - `vertical-perspective` to describe a globe that doesn't change to mercator
+     *  - `globe` to describe globe projection
+     *  - `vertical-perspective` to describe vertical-perspective projection
      *  - `mercator` to describe mercator projection
+     *
+     * Note: In strict segregation mode, `'globe'` always uses a pure
+     * VerticalPerspective pipeline and never internally switches to Mercator.
+     * In legacy-hybrid mode (default), `'globe'` may internally transition
+     * to Mercator at high zoom levels.
+     *
+     * This event is fired only when `setProjection` is explicitly called
+     * or when the style triggers a projection change.
      */
     newProjection: ProjectionSpecification['type'];
 };

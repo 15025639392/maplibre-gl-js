@@ -4,6 +4,7 @@ import {Evented} from '../../util/evented';
 import {EvaluationParameters} from '../../style/evaluation_parameters';
 import {MercatorProjection} from './mercator_projection';
 import {VerticalPerspectiveProjection} from './vertical_perspective_projection';
+import {getProjectionSegregationMode} from './projection_config';
 import {type Projection, type ProjectionGPUContext, type TileMeshUsage} from './projection';
 import {type PreparedShader} from '../../shaders/shaders';
 import {type SubdivisionGranularitySetting} from '../../render/subdivision_granularity_settings';
@@ -42,6 +43,13 @@ export class GlobeProjection extends Evented implements Projection {
     }
 
     public get transitionState(): number {
+        // In strict mode, GlobeProjection always reports full globe rendering.
+        // The factory should not create GlobeProjection in strict mode, but if it
+        // is created (e.g. via array-based definition), enforce single-pipeline behavior.
+        if (getProjectionSegregationMode() === 'strict') {
+            return 1;
+        }
+
         const currentProjectionSpecValue = this.properties.get('type');
         if (typeof currentProjectionSpecValue === 'string' && currentProjectionSpecValue === 'mercator') {
             return 0;

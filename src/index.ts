@@ -61,6 +61,7 @@ import type {GeoJSONFeatureDiff, GeoJSONFeatureId, GeoJSONSourceDiff} from './so
 import type {QueryRenderedFeaturesOptions, QuerySourceFeatureOptions} from './source/query_features';
 import type {RequestTransformFunction, ResourceType} from './util/request_manager';
 import {EXTENT} from './data/extent';
+import {getProjectionSegregationMode, setProjectionSegregationMode, type ProjectionSegregationMode} from './geo/projection/projection_config';
 import type {OverscaledTileID} from './tile/tile_id';
 import type {PositionAnchor} from './ui/anchor';
 import type {ProjectionData} from './geo/projection/projection_data';
@@ -377,5 +378,8 @@ export {
     setNow,
     restoreNow,
     isTimeFrozen,
-    EXTENT
+    EXTENT,
+    getProjectionSegregationMode,
+    setProjectionSegregationMode,
+    type ProjectionSegregationMode
 };

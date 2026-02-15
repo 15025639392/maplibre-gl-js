@@ -554,6 +554,12 @@ export class Map extends Camera {
     _styleDirty: boolean;
     _sourcesDirty: boolean;
     _placementDirty: boolean;
+    /**
+     * Tracks the previous frame's globe rendering state.
+     * Used to detect projection changes that happen between frames
+     * (e.g., when setProjectionSegregationMode is called at runtime).
+     */
+    _previousFrameGlobeRendering: boolean = false;
 
     _loaded: boolean;
     _idleTriggered = false;
@@ -3543,7 +3549,7 @@ export class Map extends Camera {
     _render(paintStartTimeStamp: number) {
         const fadeDuration = this._idleTriggered ? this._fadeDuration : 0;
 
-        const isGlobeRendering = this.style.projection?.transitionState > 0;
+        const isGlobeRenderingBeforeUpdate = this.style.projection?.transitionState > 0;
 
         // A custom layer may have used the context asynchronously. Mark the state as dirty.
         this.painter.context.setDirty();
@@ -3581,7 +3587,18 @@ export class Map extends Camera {
             this.style.update(parameters);
         }
 
-        const globeRenderingChanged = this.style.projection?.transitionState > 0 !== isGlobeRendering;
+        // Detect globe rendering state changes.
+        // Two cases must be detected:
+        // 1. Within-frame change: style.update()/recalculate() changed transitionState
+        //    (e.g., zoom crossed the legacy-hybrid transition zone at zoom 11-12).
+        // 2. Between-frame change: transitionState changed between this frame and the
+        //    previous frame (e.g., setProjectionSegregationMode('strict') was called
+        //    at runtime, causing transitionState to jump from 0 to 1).
+        const isGlobeRenderingAfterUpdate = this.style.projection?.transitionState > 0;
+        const globeRenderingChanged =
+            (isGlobeRenderingAfterUpdate !== isGlobeRenderingBeforeUpdate) ||
+            (isGlobeRenderingBeforeUpdate !== this._previousFrameGlobeRendering);
+        this._previousFrameGlobeRendering = !!isGlobeRenderingAfterUpdate;
         this.style.projection?.setErrorQueryLatitudeDegrees(this.transform.center.lat);
         this.transform.setTransitionState(this.style.projection?.transitionState, this.style.projection?.latitudeErrorCorrectionRadians);
 
