@@ -471,6 +471,34 @@ export class GlobeTransform implements ITransform {
     }
 
     recalculateZoomAndCenter(terrain?: Terrain): void {
+        // ── Fix: update the globe helper so the camera smoothly
+        //    transitions to the terrain surface when elevation-freeze
+        //    is released (movement end).
+        //
+        //    Previously only the sub-transforms' helpers were adjusted,
+        //    leaving the globe helper (the "source of truth") untouched.
+        //    That caused a visible jump: setElevation() in the render
+        //    loop would change the globe helper's elevation without a
+        //    compensating center/zoom adjustment, making the terrain
+        //    appear to suddenly rise or fall.
+        //
+        //    By calling screenPointToLocation (which uses currentTransform
+        //    — mercator at high zoom, VP at low zoom) we find where the
+        //    viewport centre falls on the terrain and feed that elevation
+        //    into the globe helper's own recalculateZoomAndCenter.  This
+        //    adjusts center, zoom AND elevation together, keeping the
+        //    camera in place while the look-at point snaps to the
+        //    terrain surface.
+        const centerOnTerrain = this.screenPointToLocation(this.centerPoint, terrain);
+        const terrainElevation = terrain
+            ? terrain.getElevationForLngLatZoom(centerOnTerrain, this._helper._tileZoom)
+            : 0;
+        this._helper.recalculateZoomAndCenter(terrainElevation);
+
+        // Sub-transforms also maintain their own helpers; update them
+        // for internal bookkeeping (the values are overwritten by the
+        // next _calcMatrices anyway, but this keeps them consistent
+        // inside a single frame if anything reads them before that).
         this._mercatorTransform.recalculateZoomAndCenter(terrain);
         this._verticalPerspectiveTransform.recalculateZoomAndCenter(terrain);
     }
