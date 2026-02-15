@@ -250,32 +250,36 @@ export class GlobeTransform implements ITransform {
     /**
      * Whether the strict-mode high-zoom mercator fallback is active.
      *
-     * When true, the **shader** has fully transitioned to mercator math
-     * (via `_computeShaderTransition`), so the internal rendering
-     * pipeline (covering tiles, frustum, depth values) should also use
-     * the mercator transform to stay consistent.
+     * When true the internal rendering pipeline (covering tiles, frustum
+     * culling, screen-to-location, near/far Z) uses the mercator
+     * transform while the *shader* handles the visual VP→mercator
+     * transition via `_computeShaderTransition`.
      *
-     * At zoom < {@link STRICT_SHADER_TRANSITION_END} this returns false
-     * and full VP rendering is used. At zoom ≥ that threshold the shader
-     * is 100 % mercator and we switch the internal pipeline too.
+     * The switch happens at {@link STRICT_SHADER_TRANSITION_START}
+     * (the moment the shader begins blending), **not** at
+     * {@link STRICT_SHADER_TRANSITION_END}.  Switching at the START
+     * ensures the internal pipeline is consistent with the shader
+     * throughout the entire transition zone — avoiding:
+     *
+     * - VP covering-tiles selecting a different set of tiles than what
+     *   the partially-mercator shader expects → seams / missing tiles
+     * - VP's extreme near/far Z polluting the depth buffer during the
+     *   blend → flickering
+     * - A hard near/far-Z jump at the END boundary → ground-plane
+     *   discontinuity ("远处地坪线突变")
      */
     private _isHighZoomMercatorFallback(): boolean {
         return getProjectionSegregationMode() === 'strict'
-            && this.zoom >= GlobeTransform.STRICT_SHADER_TRANSITION_END;
+            && this.zoom >= GlobeTransform.STRICT_SHADER_TRANSITION_START;
     }
 
     /**
      * The active internal transform for covering-tiles, frustum culling,
      * screen-to-location math and other rendering internals.
      *
-     * In strict mode at high zoom the shader has fully transitioned to
-     * mercator math, so we also switch the internal pipeline to the
-     * mercator transform.  This avoids:
-     *
-     * - VP covering-tiles instability → flickering / missing tiles
-     * - VP's extreme near/far Z polluting the mercator perspective
-     *   matrix → depth-buffer precision collapse → black screen
-     * - VP clipping-plane incorrectly culling visible geometry
+     * In strict mode at high zoom (≥ {@link STRICT_SHADER_TRANSITION_START})
+     * the shader is transitioning to (or has completed) mercator math,
+     * so we also switch the internal pipeline to the mercator transform.
      */
     private get currentTransform(): ITransform {
         if (this.isGlobeRendering && this._isHighZoomMercatorFallback()) {
@@ -331,30 +335,33 @@ export class GlobeTransform implements ITransform {
      * pure mercator math via `u_projection_fallback_matrix`.
      *
      * The transition exists because the VP globe matrix is stored as Float32
-     * on the GPU. At high zoom `globeRadiusPixels` is enormous (tens of
-     * millions), and the float32 precision of the matrix can no longer
-     * distinguish adjacent tile-boundary vertices — causing visible tile
-     * seams and, at extreme zoom, a black screen.
+     * on the GPU. At high zoom `globeRadiusPixels` is enormous, and the
+     * float32 precision of the matrix can no longer distinguish adjacent
+     * tile-boundary vertices — causing visible tile seams and, at extreme
+     * zoom, a black screen.
      *
      * | zoom | globeRadiusPixels ≈ | float32 screen error |
      * |------|---------------------|----------------------|
-     * |  14  |        1 744 K      |       ~0.1 px        |
-     * |  15  |        3 488 K      |       ~0.2 px        |
-     * |  16  |        6 975 K      |       ~0.4 px        |
-     * |  17  |       13 950 K      |       ~0.8 px        |
-     * |  18  |       27 900 K      |       ~1.7 px        |
-     * |  19+ |       55 800 K+     |       ~3.3 px+       |
+     * |  11  |          167 K      |       ~0.02 px       |
+     * |  12  |          334 K      |       ~0.04 px       |
+     * |  13  |          668 K      |       ~0.08 px       |
+     * |  14  |        1 336 K      |       ~0.16 px       |
+     * |  15+ |        2 672 K+     |       ~0.32 px+      |
      *
-     * At zoom ≥ 13 the visual difference between globe and mercator is
-     * already imperceptible (< 0.03 px per 512-pixel tile at the equator),
-     * so switching the *shader* to mercator has zero user-visible impact
-     * while completely eliminating the precision artifacts. Everything
-     * else — API surface, covering-tiles, camera helpers — stays in globe
-     * mode.
+     * The transition starts at zoom 11 (where float32 error is only 0.02 px
+     * — far below any visible threshold) and completes at zoom 13. This
+     * gives a **2-zoom-level gradual fade** which is much smoother than a
+     * narrow 1-zoom-level transition. At zoom 11 the visual difference
+     * between globe and mercator is already < 1 px across the entire
+     * viewport, so the blend is imperceptible to users.
+     *
+     * The internal rendering pipeline (covering tiles, frustum, near/far Z)
+     * also switches to mercator at STRICT_SHADER_TRANSITION_START to stay
+     * consistent with the shader — see {@link _isHighZoomMercatorFallback}.
      */
-    static readonly STRICT_SHADER_TRANSITION_START = 13;
+    static readonly STRICT_SHADER_TRANSITION_START = 10.6;
     /** Zoom level at which the strict-mode shader is fully mercator. */
-    static readonly STRICT_SHADER_TRANSITION_END = 14;
+    static readonly STRICT_SHADER_TRANSITION_END = 12.6;
 
     /**
      * Compute the effective `projectionTransition` uniform for the shader.
@@ -423,33 +430,54 @@ export class GlobeTransform implements ITransform {
         if (!this._helper._width || !this._helper._height) {
             return;
         }
-        // VerticalPerspective reads our near/farZ values and autoCalculateNearFarZ:
-        // - if autoCalculateNearFarZ is true then it computes globe Z values
-        // - if autoCalculateNearFarZ is false then it inherits our Z values
-        // In either case, its Z values are consistent with out settings and we want to copy its Z values to our helper.
-        this._verticalPerspectiveTransform.apply(this, false, this._globeLatitudeErrorCorrectionRadians);
-        this._helper._nearZ = this._verticalPerspectiveTransform.nearZ;
-        this._helper._farZ = this._verticalPerspectiveTransform.farZ;
 
-        // When transitioning between globe and mercator, we need to synchronize the depth values in both transforms.
-        // For this reason we first update vertical perspective and then sync our Z values to its result.
+        // ── 1. Always compute VP matrices (needed for the globe shader path
+        //       even when the internal pipeline has switched to mercator).
+        this._verticalPerspectiveTransform.apply(this, false, this._globeLatitudeErrorCorrectionRadians);
+        const vpNearZ = this._verticalPerspectiveTransform.nearZ;
+        const vpFarZ = this._verticalPerspectiveTransform.farZ;
+
+        // Copy VP Z to the globe helper first — mercator's apply() reads
+        // them when forceOverrideZ = true.
+        this._helper._nearZ = vpNearZ;
+        this._helper._farZ = vpFarZ;
+
+        // ── 2. Compute mercator matrices.
         //
-        // `forceOverrideZ` controls whether the mercator transform inherits VP's Z values
-        // (autoCalculateNearFarZ = false) or computes its own (autoCalculateNearFarZ = true).
+        //    `forceOverrideZ` = true  → mercator inherits VP's near/far Z
+        //                               (keeps depth buffers synchronized
+        //                               during the globe↔mercator blend)
+        //    `forceOverrideZ` = false → mercator computes its own near/far Z
         //
-        // In legacy-hybrid mode or strict mode below the shader transition threshold,
-        // we force VP's Z values onto mercator to keep depth buffers synchronized
-        // during the globe↔mercator blend.
-        //
-        // In strict mode at high zoom (shader fully transitioned to mercator), we let
-        // mercator compute its OWN near/far Z. VP's extreme Z values
-        // (nearZ=0.5, farZ=cameraToCenterDistance + globeRadiusPixels*2 ≈ 55M @zoom18)
-        // would give a near/far ratio of ~110M:1, completely destroying depth-buffer
-        // precision and causing a black screen.
-        const forceVPDepthValues = this.isGlobeRendering && !this._isHighZoomMercatorFallback();
+        //    In the transition zone (strict mode, zoom ≥ TRANSITION_START)
+        //    we let mercator compute its own Z so we can interpolate below.
+        const inFallback = this._isHighZoomMercatorFallback();
+        const forceVPDepthValues = this.isGlobeRendering && !inFallback;
         this._mercatorTransform.apply(this, true, forceVPDepthValues);
-        this._helper._nearZ = this._mercatorTransform.nearZ;
-        this._helper._farZ = this._mercatorTransform.farZ;
+        const mercNearZ = this._mercatorTransform.nearZ;
+        const mercFarZ = this._mercatorTransform.farZ;
+
+        // ── 3. Set globe-helper Z values.
+        //
+        //    During the strict-mode transition zone the shader is smoothly
+        //    blending VP ↔ mercator.  A hard Z switch would cause:
+        //      - horizon / ground-plane discontinuity
+        //      - depth-buffer precision jump → terrain flickering
+        //
+        //    We therefore *interpolate* near/far Z using the same shader
+        //    transition factor (1 = full VP, 0 = full mercator).  At the
+        //    start of the zone the Z values are still VP's; at the end
+        //    they are mercator's; in between they change smoothly.
+        if (inFallback) {
+            const t = this._computeShaderTransition(true);
+            this._helper._nearZ = t > 0 ? lerp(mercNearZ, vpNearZ, t) : mercNearZ;
+            this._helper._farZ  = t > 0 ? lerp(mercFarZ, vpFarZ, t) : mercFarZ;
+        } else {
+            // Outside transition: use the mercator Z as final (which was
+            // computed with VP's Z forced, so they're in sync).
+            this._helper._nearZ = mercNearZ;
+            this._helper._farZ = mercFarZ;
+        }
     }
 
     calculateFogMatrix(unwrappedTileID: UnwrappedTileID): mat4 {
